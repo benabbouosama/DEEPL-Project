@@ -166,11 +166,17 @@ def create_dataloader(args, rank, world_size):
     # -----------------------
     # Transform
     # -----------------------
-    transform = transforms.Compose([
+    transform_list = [
         transforms.Resize(args.resolution),
         transforms.CenterCrop(args.resolution),
         transforms.ToTensor(),
-    ])
+        # Add Normalization here if needed, e.g.:
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ]
+    
+    # We create a specific transform for local files that handles RGB conversion
+    # inside the Compose (ImageFolder usually loads RGB, but to be safe):
+    local_transform = transforms.Compose(transform_list)
 
     # -----------------------
     # Load dataset
@@ -186,15 +192,24 @@ def create_dataloader(args, rank, world_size):
             )
 
             # Apply transform
-            def transform_fn(example):
-                # example["image"] is a list of paths
-                imgs = []
-                for img_path in example["image"]:
-                    img = Image.open(img_path).convert("RGB")  # open image
-                    img = transform(img)  # apply your transforms
-                    imgs.append(img)
-                example["image"] = torch.stack(imgs)  # make a tensor
-                return example
+            def transform_fn(examples):
+                # 'examples' is a dict of lists: {'image': [PIL.Image, ...], 'label': [int, ...]}
+                
+                pixel_values = []
+                for image in examples["image"]:
+                    # 1. Convert to RGB to avoid channel errors
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    
+                    # 2. Apply transforms
+                    # We apply the list manually or use a Compose without the RGB check 
+                    # since we did it above.
+                    trans = transforms.Compose(transform_list)
+                    pixel_values.append(trans(image))
+                
+                # Return dictionary with transformed tensors
+                # Do NOT torch.stack() here; the DataLoader collate_fn handles stacking.
+                return {"image": pixel_values, "label": examples["label"]}
 
             ds = ds.with_transform(transform_fn)
 
@@ -206,7 +221,7 @@ def create_dataloader(args, rank, world_size):
 
             train_dataset = datasets.ImageFolder(
                 os.path.join(args.data_dir, "train"),
-                transform=transform
+                transform=local_transform
             )
 
     else:
