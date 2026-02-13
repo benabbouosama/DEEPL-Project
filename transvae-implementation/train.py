@@ -13,6 +13,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import yaml
 from pathlib import Path
+from torchvision import transforms
+from datasets import load_dataset
 
 from transvae import TransVAE, TransVAELoss
 
@@ -110,8 +112,11 @@ def create_model(args, config):
     return model
 
 
-def create_dataloader(args, rank, world_size):
+def create_dataloader_old(args, rank, world_size):
     """Create data loader"""
+    # from datasets import load_dataset
+
+    # ds = load_dataset("evanarlian/imagenet_1k_resized_256")
     # Import dataset here to avoid circular imports
     if args.dataset == 'imagenet':
         from torchvision import datasets, transforms
@@ -152,6 +157,82 @@ def create_dataloader(args, rank, world_size):
     
     return dataloader, sampler
 
+
+def create_dataloader(args, rank, world_size):
+    """Create dataloader with optional streaming support"""
+
+    # -----------------------
+    # Transform
+    # -----------------------
+    transform = transforms.Compose([
+        transforms.Resize(args.resolution),
+        transforms.CenterCrop(args.resolution),
+        transforms.ToTensor(),
+    ])
+
+    # -----------------------
+    # Load dataset
+    # -----------------------
+    if args.dataset == "imagenet":
+
+        if getattr(args, "hf_dataset", True):
+            # Use HuggingFace dataset
+            ds = load_dataset(
+                "evanarlian/imagenet_1k_resized_256",
+                split="train",
+                streaming=getattr(args, "streaming", False)
+            )
+
+            # Apply transform
+            def transform_fn(example):
+                example["image"] = transform(example["image"])
+                return example
+
+            ds = ds.with_transform(transform_fn)
+
+            train_dataset = ds
+
+        else:
+            # Use local ImageFolder
+            from torchvision import datasets
+
+            train_dataset = datasets.ImageFolder(
+                os.path.join(args.data_dir, "train"),
+                transform=transform
+            )
+
+    else:
+        raise NotImplementedError(f"Dataset {args.dataset} not implemented")
+
+    # -----------------------
+    # Distributed Sampler
+    # -----------------------
+    if world_size > 1 and not getattr(args, "streaming", False):
+        sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+        )
+        shuffle = False
+    else:
+        sampler = None
+        shuffle = True
+
+    # -----------------------
+    # DataLoader
+    # -----------------------
+    dataloader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        shuffle=shuffle,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    return dataloader, sampler
 
 def train_epoch(
     model, 
