@@ -7,7 +7,7 @@ pillow>=9.0.0
 # Training and optimization
 timm>=0.9.0
 einops>=0.6.0
-flash-attn>=2.3.0
+# flash-attn>=2.3.0
 
 # Metrics and evaluation
 lpips>=0.1.4
