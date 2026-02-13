@@ -276,8 +276,17 @@ def train_epoch(
     total_loss = 0
     step = 0
     
-    for batch_idx, (images, _) in enumerate(pbar):
-        images = images.cuda()
+    # CHANGE 1: Don't unpack (images, _) in the loop header. Get the whole batch.
+    for batch_idx, batch in enumerate(pbar):
+        
+        # CHANGE 2: Check if batch is a Dict (HuggingFace) or Tuple (ImageFolder)
+        if isinstance(batch, dict):
+            images = batch["image"]
+        else:
+            images, _ = batch
+
+        # Now images is a Tensor, so .cuda() (or .to(device)) works
+        images = images.to(args.device, non_blocking=True)
         
         # Forward pass
         if args.mixed_precision:
