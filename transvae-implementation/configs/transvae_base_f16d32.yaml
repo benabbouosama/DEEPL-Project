@@ -1,7 +1,7 @@
 # TransVAE-Large f16d32 Configuration
 
 model:
-  variant: large
+  variant: base
   compression_ratio: 16     # f
   latent_dim: 32      # d
   
