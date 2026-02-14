@@ -16,6 +16,8 @@ from pathlib import Path
 from torchvision import transforms
 from datasets import load_dataset
 from PIL import Image
+import torch, gc
+
 
 
 from transvae import TransVAE, TransVAELoss
@@ -408,6 +410,10 @@ def save_checkpoint(model, optimizer, epoch, step, save_path, args):
 
 
 def main():
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
     args = parse_args()
     
     # Setup distributed training
@@ -493,6 +499,10 @@ def main():
             if (epoch + 1) % 5 == 0 or (epoch + 1) == args.num_epochs:
                 save_path = os.path.join(args.output_dir, f'checkpoint_epoch{epoch}.pth')
                 save_checkpoint(model, optimizer, epoch, 0, save_path, args)
+        
+        # Periodic memory clean
+        gc.collect()
+        torch.cuda.empty_cache()
     
     if rank == 0 and writer is not None:
         writer.close()
@@ -501,9 +511,4 @@ def main():
 
 
 if __name__ == '__main__':
-    import torch, gc
-
-    gc.collect()
-    torch.cuda.empty_cache()
-
     main()
