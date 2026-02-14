@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument('--resolution', type=int, default=256, help='Training resolution')
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--num_workers', type=int, default=8)
+    parser.add_argument('--streaming', type=bool, default=False)
     
     # Training arguments
     parser.add_argument('--num_epochs', type=int, default=100)
@@ -381,7 +382,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Create model
-    print(f"Creating TransVAE-{args.variant} model...")
+    print(f"Creating TransVAE-{config.get("variant", args.variant)}-f{config.get("compression_ratio", args.compression_ratio)}d{config.get("latent_dim", args.latent_dim)} model...")
     model = create_model(args, config)
     model = model.cuda()
     
