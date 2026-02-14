@@ -241,6 +241,9 @@ class TransVAE(nn.Module):
             logvar: Latent log variance [B, D, H/f, W/f]
         """
         mu, logvar = self.encode(x)
+        mu = mu.clamp(-50, 50)
+        logvar = logvar.clamp(-30, 20)
+
         z = self.reparameterize(mu, logvar)
         reconstruction = self.decode(z)
         
