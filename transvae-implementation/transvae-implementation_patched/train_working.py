@@ -134,7 +134,7 @@ def create_dataloader(args, rank, world_size):
         ds = load_dataset(
             "evanarlian/imagenet_1k_resized_256",
             split="train",
-            streaming=args.streaming or True,
+            streaming=args.streaming or False,
         )
 
         if world_size > 1:
