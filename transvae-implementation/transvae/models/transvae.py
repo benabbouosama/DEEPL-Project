@@ -90,8 +90,8 @@ class TransVAE(nn.Module):
                 'head_dim': 64,
             },
             'base_f16d32': {
-                'depths': [3, 3, 3, 3, 3],
-                'base_dims': [128, 128, 256, 512, 1024],
+                'depths': [3, 3, 3],
+                'base_dims': [128, 256, 512],
                 'mlp_ratio': 1.0,
                 'head_dim': 64,
             },
