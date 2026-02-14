@@ -270,17 +270,27 @@ def create_dataloader(args, rank, world_size):
     # -----------------------
     # Distributed Sampler
     # -----------------------
-    if world_size > 1 and not getattr(args, "streaming", False):
-        sampler = DistributedSampler(
-            train_dataset,
-            num_replicas=world_size,
-            rank=rank,
-            shuffle=True,
-        )
+    # if world_size > 1 and not getattr(args, "streaming", False):
+    #     sampler = DistributedSampler(
+    #         train_dataset,
+    #         num_replicas=world_size,
+    #         rank=rank,
+    #         shuffle=True,
+    #     )
+    #     shuffle = False
+    # else:
+    #     sampler = None
+    #     shuffle = True
+    # Samplers (only for non-streaming)
+    is_streaming = True if getattr(args, "hf_dataset", True) else False
+    
+    if world_size > 1 and not is_streaming:
+        sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
         shuffle = False
     else:
         sampler = None
-        shuffle = True
+        # Disable DataLoader shuffling if streaming (we did it manually above)
+        shuffle = False if is_streaming else True
 
     # -----------------------
     # DataLoader
