@@ -360,7 +360,17 @@ def train_epoch(
 
     amp_dtype = torch.bfloat16 if (args.mixed_precision and torch.cuda.is_bf16_supported()) else torch.float16
 
-    for batch_idx, (images, _) in enumerate(pbar):
+    # for batch_idx, (images, _) in enumerate(pbar):
+        # images = images.to(args.device, non_blocking=True)
+    for batch_idx, batch in enumerate(pbar):
+        
+        # CHANGE 2: Check if batch is a Dict (HuggingFace) or Tuple (ImageFolder)
+        if isinstance(batch, dict):
+            images = batch["image"]
+        else:
+            images, _ = batch
+
+        # Now images is a Tensor, so .cuda() (or .to(device)) works
         images = images.cuda(non_blocking=True)
 
         # channels_last can help on Ampere+ for conv-heavy models
