@@ -36,6 +36,63 @@ from datasets import load_dataset
 
 from transvae import TransVAE, TransVAELoss
 
+import os
+import kagglehub
+
+from torch.utils.data import Dataset
+from PIL import Image
+import json
+
+class COCODataset(Dataset):
+    def __init__(self, root, transform=None, max_samples=None):
+        self.root = root
+        self.transform = transform
+
+        ann_file = os.path.join(root, "annotations", "instances_train2017.json")
+        with open(ann_file, "r") as f:
+            coco = json.load(f)
+
+        self.images = coco["images"]
+
+        # 🔥 limit dataset size
+        if max_samples is not None:
+            self.images = self.images[:max_samples]
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img_info = self.images[idx]
+        img_path = os.path.join(self.root, "train2017", img_info["file_name"])
+
+        image = Image.open(img_path).convert("RGB")
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, 0  # label unused
+
+def get_coco_root():
+    """
+    Returns local path to COCO 2017 dataset.
+    Downloads it only if not already present.
+    """
+    cache_dir = os.path.expanduser("~/.cache/kagglehub/datasets/awsaf49/coco-2017-dataset")
+
+    # If already downloaded, reuse latest version
+    if os.path.exists(cache_dir) and len(os.listdir(cache_dir)) > 0:
+        versions = sorted(os.listdir(cache_dir))
+        latest_version = versions[-1]
+        coco_root = os.path.join(cache_dir, latest_version)
+        print(f"✅ Using cached COCO dataset at {coco_root}")
+        return coco_root
+
+    # Otherwise download
+    print("⬇️ COCO dataset not found. Downloading...")
+    coco_root = kagglehub.dataset_download("awsaf49/coco-2017-dataset")
+    print(f"✅ COCO dataset downloaded to {coco_root}")
+    return coco_root
+
 
 def parse_args():
     p = argparse.ArgumentParser("Train TransVAE (patched)")
@@ -184,131 +241,38 @@ class HFTransformIterableDataset(torch.utils.data.IterableDataset):
 
 
 def create_dataloader(args, rank, world_size):
-    """Create dataloader with optional streaming support"""
 
-    # -----------------------
-    # Transform
-    # -----------------------
-    transform_list = [
+    transform = transforms.Compose([
         transforms.Resize(args.resolution),
         transforms.CenterCrop(args.resolution),
-        transforms.ToTensor(),
-        # Add Normalization here if needed, e.g.:
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ]
-    
-    # We create a specific transform for local files that handles RGB conversion
-    # inside the Compose (ImageFolder usually loads RGB, but to be safe):
-    local_transform = transforms.Compose(transform_list)
+        transforms.ToTensor(),  # [0,1]
+    ])
 
-    # -----------------------
-    # Load dataset
-    # -----------------------
-    if args.dataset == "imagenet":
+    if args.dataset == "coco":
+        coco_root = get_coco_root()
 
-        if getattr(args, "hf_dataset", True):
-            # Use HuggingFace dataset
-            ds = load_dataset(
-                "evanarlian/imagenet_1k_resized_256",
-                split="train",
-                streaming=getattr(args, "streaming", False)
-            )
-
-            # Apply transform
-            def transform_fn(examples):
-                # 'examples' is a dict of lists: {'image': [PIL.Image, ...], 'label': [int, ...]}
-                
-                pixel_values = []
-                for image in examples["image"]:
-                    # 1. Convert to RGB to avoid channel errors
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
-                    
-                    # 2. Apply transforms
-                    # We apply the list manually or use a Compose without the RGB check 
-                    # since we did it above.
-                    trans = transforms.Compose(transform_list)
-                    pixel_values.append(trans(image))
-                
-                # Return dictionary with transformed tensors
-                # Do NOT torch.stack() here; the DataLoader collate_fn handles stacking.
-                return {"image": pixel_values, "label": examples["label"]}
-
-            ds = ds.with_transform(transform_fn)
-
-            train_dataset = ds.take(getattr(args, "size", 200000))
-
-            # # --- 1. Distributed Sharding for Streaming ---
-            # if world_size > 1:
-            #     ds = ds.shard(num_shards=world_size, index=rank)
-            
-            # # --- 2. Shuffle for Streaming (CRITICAL) ---
-            # # DataLoader shuffle=True doesn't work for streams. 
-            # # We must shuffle the stream buffer.
-            # ds = ds.shuffle(seed=42, buffer_size=10_000)
-
-            # # --- 3. Transform Function ---
-            # def transform_fn(examples):
-            #     pixel_values = []
-            #     for image in examples["image"]:
-            #         if image.mode != "RGB":
-            #             image = image.convert("RGB")
-            #         # Apply transforms
-            #         trans = transforms.Compose(transform_list)
-            #         pixel_values.append(trans(image))
-            #     return {"image": pixel_values, "label": examples["label"]}
-
-            # # --- 4. FIX: Use .map() instead of .with_transform() ---
-            # # batched=True makes it efficient (processes batch_size items at once)
-            # # but it still yields 1 item at a time to the DataLoader
-            # ds = ds.map(transform_fn, batched=True, batch_size=args.batch_size)
-
-            # train_dataset = ds
-
-        else:
-            # Use local ImageFolder
-            from torchvision import datasets
-
-            train_dataset = datasets.ImageFolder(
-                os.path.join(args.data_dir, "train"),
-                transform=local_transform
-            )
+        train_dataset = COCODataset(
+            root=coco_root,
+            transform=transform,
+            max_samples=args.size  # 🔥 USE ONLY ONE TRAINING SET
+        )
 
     else:
-        raise NotImplementedError(f"Dataset {args.dataset} not implemented")
+        raise NotImplementedError
 
-    # -----------------------
-    # Distributed Sampler
-    # -----------------------
-    if world_size > 1 and not getattr(args, "streaming", False):
+    if world_size > 1:
         sampler = DistributedSampler(
             train_dataset,
             num_replicas=world_size,
             rank=rank,
-            shuffle=True,
+            shuffle=True
         )
         shuffle = False
     else:
         sampler = None
         shuffle = True
-    # Samplers (only for non-streaming)
-    # is_streaming = True if getattr(args, "hf_dataset", True) else False
-    
-    # if world_size > 1 and not is_streaming:
-    #     sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
-    #     shuffle = False
-    # else:
-    #     sampler = None
-    #     # Disable DataLoader shuffling if streaming (we did it manually above)
-    #     shuffle = False if is_streaming else True
 
-    # -----------------------
-    # DataLoader
-    # -----------------------
-    # size = int(len(train_dataset) * 0.7)
-    size = 840000
     dataloader = DataLoader(
-        # train_dataset[:size],
         train_dataset,
         batch_size=args.batch_size,
         sampler=sampler,
