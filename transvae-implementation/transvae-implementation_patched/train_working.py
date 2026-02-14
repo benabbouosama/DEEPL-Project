@@ -54,6 +54,7 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--hf_dataset", action="store_true")
     p.add_argument("--streaming", action="store_true")
+    p.add_argument("--size", type=int, default=200000)
 
     # training
     p.add_argument("--num_epochs", type=int, default=100)
@@ -235,7 +236,7 @@ def create_dataloader(args, rank, world_size):
 
             ds = ds.with_transform(transform_fn)
 
-            train_dataset = ds
+            train_dataset = ds.take(getattr(args, "streaming", 200000))
 
             # # --- 1. Distributed Sharding for Streaming ---
             # if world_size > 1:
