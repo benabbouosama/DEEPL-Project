@@ -259,7 +259,8 @@ def create_dataloader(args, rank, world_size):
     # size = int(len(train_dataset) * 0.7)
     size = 840000
     dataloader = DataLoader(
-        train_dataset[:size],
+        # train_dataset[:size],
+        train_dataset,
         batch_size=args.batch_size,
         sampler=sampler,
         shuffle=shuffle,
