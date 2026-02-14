@@ -449,4 +449,9 @@ def main():
 
 
 if __name__ == '__main__':
+    import torch, gc
+
+    gc.collect()
+    torch.cuda.empty_cache()
+
     main()
