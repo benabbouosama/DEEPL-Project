@@ -416,10 +416,12 @@ def main():
     config = load_config(args.config)
     os.makedirs(args.output_dir, exist_ok=True)
 
+    model_config = config.get('model', {})
+
     if rank == 0:
-        print(f"Creating TransVAE-{config.get('variant', args.variant)} "
-              f"-f{config.get('compression_ratio', args.compression_ratio)}"
-              f"d{config.get('latent_dim', args.latent_dim)} model...")
+        print(f"Creating TransVAE-{model_config.get('variant', args.variant)} "
+              f"-f{model_config.get('compression_ratio', args.compression_ratio)}"
+              f"d{model_config.get('latent_dim', args.latent_dim)} model...")
 
     model = create_model(args, config).to(args.device)
 
