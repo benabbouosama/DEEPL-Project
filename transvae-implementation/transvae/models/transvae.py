@@ -84,8 +84,8 @@ class TransVAE(nn.Module):
         
         configs = {
             'tiny_f16d32': {
-                'depths': [3, 3, 3, 3, 3],
-                'base_dims': [128, 128, 256, 256, 512],
+                'depths': [3, 3, 3, 3],
+                'base_dims': [128, 128, 256, 512],
                 'mlp_ratio': 1.0,
                 'head_dim': 64,
             },
