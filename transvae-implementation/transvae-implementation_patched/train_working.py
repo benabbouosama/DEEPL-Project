@@ -119,56 +119,195 @@ class HFTransformIterableDataset(torch.utils.data.IterableDataset):
             yield img, sample.get("label", 0)
 
 
-def create_dataloader(args, rank, world_size):
-    if args.dataset != "imagenet":
-        raise NotImplementedError("Only imagenet is wired in this script.")
+# def create_dataloader(args, rank, world_size):
+#     if args.dataset != "imagenet":
+#         raise NotImplementedError("Only imagenet is wired in this script.")
 
-    # IMPORTANT: keep target in [0,1]. Loss will apply sigmoid() to reconstruction.
-    transform = transforms.Compose([
+#     # IMPORTANT: keep target in [0,1]. Loss will apply sigmoid() to reconstruction.
+#     transform = transforms.Compose([
+#         transforms.Resize(args.resolution),
+#         transforms.CenterCrop(args.resolution),
+#         transforms.ToTensor(),
+#     ])
+
+#     if args.hf_dataset:
+#         ds = load_dataset(
+#             "evanarlian/imagenet_1k_resized_256",
+#             split="train",
+#             streaming=args.streaming or False,
+#         )
+
+#         if world_size > 1:
+#             ds = ds.shard(num_shards=world_size, index=rank)
+
+#         ds = ds.shuffle(seed=42, buffer_size=10_000)
+#         train_dataset = HFTransformIterableDataset(ds, transform)
+
+#         dataloader = DataLoader(
+#             train_dataset,
+#             batch_size=args.batch_size,
+#             num_workers=args.num_workers,
+#             pin_memory=True,
+#             drop_last=True,
+#             prefetch_factor=2 if args.num_workers > 0 else None,
+#             persistent_workers=False,
+#         )
+#         return dataloader, None
+
+#     # local ImageFolder
+#     if not args.data_dir:
+#         raise ValueError("--data_dir is required when not using --hf_dataset")
+
+#     from torchvision import datasets
+#     train_dataset = datasets.ImageFolder(osp.join(args.data_dir, "train"), transform=transform)
+
+#     if world_size > 1:
+#         sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+#         shuffle = False
+#     else:
+#         sampler = None
+#         shuffle = True
+
+#     dataloader = DataLoader(
+#         train_dataset,
+#         batch_size=args.batch_size,
+#         sampler=sampler,
+#         shuffle=shuffle,
+#         num_workers=args.num_workers,
+#         pin_memory=True,
+#         drop_last=True,
+#         prefetch_factor=2 if args.num_workers > 0 else None,
+#         persistent_workers=True if args.num_workers > 0 else False,
+#     )
+#     return dataloader, sampler
+
+
+def create_dataloader(args, rank, world_size):
+    """Create dataloader with optional streaming support"""
+
+    # -----------------------
+    # Transform
+    # -----------------------
+    transform_list = [
         transforms.Resize(args.resolution),
         transforms.CenterCrop(args.resolution),
         transforms.ToTensor(),
-    ])
+        # Add Normalization here if needed, e.g.:
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ]
+    
+    # We create a specific transform for local files that handles RGB conversion
+    # inside the Compose (ImageFolder usually loads RGB, but to be safe):
+    local_transform = transforms.Compose(transform_list)
 
-    if args.hf_dataset:
-        ds = load_dataset(
-            "evanarlian/imagenet_1k_resized_256",
-            split="train",
-            streaming=args.streaming or False,
-        )
+    # -----------------------
+    # Load dataset
+    # -----------------------
+    if args.dataset == "imagenet":
 
-        if world_size > 1:
-            ds = ds.shard(num_shards=world_size, index=rank)
+        if getattr(args, "hf_dataset", True):
+            # Use HuggingFace dataset
+            ds = load_dataset(
+                "evanarlian/imagenet_1k_resized_256",
+                split="train",
+                streaming=getattr(args, "streaming", False)
+            )
 
-        ds = ds.shuffle(seed=42, buffer_size=10_000)
-        train_dataset = HFTransformIterableDataset(ds, transform)
+            # Apply transform
+            def transform_fn(examples):
+                # 'examples' is a dict of lists: {'image': [PIL.Image, ...], 'label': [int, ...]}
+                
+                pixel_values = []
+                for image in examples["image"]:
+                    # 1. Convert to RGB to avoid channel errors
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    
+                    # 2. Apply transforms
+                    # We apply the list manually or use a Compose without the RGB check 
+                    # since we did it above.
+                    trans = transforms.Compose(transform_list)
+                    pixel_values.append(trans(image))
+                
+                # Return dictionary with transformed tensors
+                # Do NOT torch.stack() here; the DataLoader collate_fn handles stacking.
+                return {"image": pixel_values, "label": examples["label"]}
 
-        dataloader = DataLoader(
+            ds = ds.with_transform(transform_fn)
+
+            train_dataset = ds
+
+            # # --- 1. Distributed Sharding for Streaming ---
+            # if world_size > 1:
+            #     ds = ds.shard(num_shards=world_size, index=rank)
+            
+            # # --- 2. Shuffle for Streaming (CRITICAL) ---
+            # # DataLoader shuffle=True doesn't work for streams. 
+            # # We must shuffle the stream buffer.
+            # ds = ds.shuffle(seed=42, buffer_size=10_000)
+
+            # # --- 3. Transform Function ---
+            # def transform_fn(examples):
+            #     pixel_values = []
+            #     for image in examples["image"]:
+            #         if image.mode != "RGB":
+            #             image = image.convert("RGB")
+            #         # Apply transforms
+            #         trans = transforms.Compose(transform_list)
+            #         pixel_values.append(trans(image))
+            #     return {"image": pixel_values, "label": examples["label"]}
+
+            # # --- 4. FIX: Use .map() instead of .with_transform() ---
+            # # batched=True makes it efficient (processes batch_size items at once)
+            # # but it still yields 1 item at a time to the DataLoader
+            # ds = ds.map(transform_fn, batched=True, batch_size=args.batch_size)
+
+            # train_dataset = ds
+
+        else:
+            # Use local ImageFolder
+            from torchvision import datasets
+
+            train_dataset = datasets.ImageFolder(
+                os.path.join(args.data_dir, "train"),
+                transform=local_transform
+            )
+
+    else:
+        raise NotImplementedError(f"Dataset {args.dataset} not implemented")
+
+    # -----------------------
+    # Distributed Sampler
+    # -----------------------
+    if world_size > 1 and not getattr(args, "streaming", False):
+        sampler = DistributedSampler(
             train_dataset,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            pin_memory=True,
-            drop_last=True,
-            prefetch_factor=2 if args.num_workers > 0 else None,
-            persistent_workers=False,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
         )
-        return dataloader, None
-
-    # local ImageFolder
-    if not args.data_dir:
-        raise ValueError("--data_dir is required when not using --hf_dataset")
-
-    from torchvision import datasets
-    train_dataset = datasets.ImageFolder(osp.join(args.data_dir, "train"), transform=transform)
-
-    if world_size > 1:
-        sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
         shuffle = False
     else:
         sampler = None
         shuffle = True
+    # Samplers (only for non-streaming)
+    # is_streaming = True if getattr(args, "hf_dataset", True) else False
+    
+    # if world_size > 1 and not is_streaming:
+    #     sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+    #     shuffle = False
+    # else:
+    #     sampler = None
+    #     # Disable DataLoader shuffling if streaming (we did it manually above)
+    #     shuffle = False if is_streaming else True
 
+    # -----------------------
+    # DataLoader
+    # -----------------------
+    # size = int(len(train_dataset) * 0.7)
+    size = 840000
     dataloader = DataLoader(
+        # train_dataset[:size],
         train_dataset,
         batch_size=args.batch_size,
         sampler=sampler,
@@ -176,9 +315,8 @@ def create_dataloader(args, rank, world_size):
         num_workers=args.num_workers,
         pin_memory=True,
         drop_last=True,
-        prefetch_factor=2 if args.num_workers > 0 else None,
-        persistent_workers=True if args.num_workers > 0 else False,
     )
+
     return dataloader, sampler
 
 
