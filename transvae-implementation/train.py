@@ -426,6 +426,9 @@ def create_dataloader(args, rank, world_size):
                             image = image.convert("RGB")
                         image = self.transform(image)
                         yield image, sample["label"]
+
+                def __len__(self):
+                    return len(self.dataset)
             
             train_dataset = TransformDataset(ds, transform)
         else:
