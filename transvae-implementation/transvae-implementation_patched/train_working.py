@@ -236,7 +236,7 @@ def create_dataloader(args, rank, world_size):
 
             ds = ds.with_transform(transform_fn)
 
-            train_dataset = ds.take(getattr(args, "streaming", 200000))
+            train_dataset = ds.take(getattr(args, "size", 200000))
 
             # # --- 1. Distributed Sharding for Streaming ---
             # if world_size > 1:
