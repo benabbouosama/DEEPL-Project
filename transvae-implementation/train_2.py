@@ -307,7 +307,10 @@ def train_epoch(
             reconstruction, mu, logvar = model(images)
 
         # Loss in FP32 with autocast disabled (LPIPS/KL stability)
-        with torch.cuda.amp.autocast(enabled=False):
+        amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+
+        with torch.cuda.amp.autocast(dtype=amp_dtype):
+        # with torch.cuda.amp.autocast(enabled=False):
             rec32 = reconstruction.float()
             img32 = images.float()
             mu32 = mu.float()
