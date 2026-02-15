@@ -71,7 +71,7 @@ class COCODataset(Dataset):
             image = self.transform(image)
 
         return image, 0  # label unused
-
+    
 def get_coco_root():
     """
     Returns local path to COCO 2017 dataset.
