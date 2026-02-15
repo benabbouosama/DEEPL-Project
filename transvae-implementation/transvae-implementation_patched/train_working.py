@@ -75,29 +75,24 @@ class COCODataset(Dataset):
 def get_coco_root():
     """
     Returns local path to COCO 2017 dataset.
-    Downloads missing files automatically.
+    Downloads it only if not already present.
     """
     cache_dir = os.path.expanduser("~/.cache/kagglehub/datasets/awsaf49/coco-2017-dataset")
 
-    # If cache exists, check if train/images and annotations exist
-    if os.path.exists(cache_dir):
+    # If already downloaded, reuse latest version
+    if os.path.exists(cache_dir) and len(os.listdir(cache_dir)) > 0:
         versions = sorted(os.listdir(cache_dir))
-        if versions:
-            latest_version = versions[-1]
-            coco_root = os.path.join(cache_dir, latest_version)
-            ann_file = os.path.join(coco_root, "annotations", "instances_train2017.json")
-            train_dir = os.path.join(coco_root, "train2017")
+        latest_version = versions[-1]
+        coco_root = os.path.join(cache_dir, latest_version)
+        print(f"✅ Using cached COCO dataset at {coco_root}")
+        return coco_root
 
-            # If both exist, return
-            if os.path.exists(ann_file) and os.path.exists(train_dir):
-                print(f"✅ Using cached COCO dataset at {coco_root}")
-                return coco_root
-
-    # Otherwise, download using kagglehub
-    print("⬇️ COCO dataset not found or incomplete. Downloading via kagglehub...")
-    coco_root = kagglehub.dataset_download("awsaf49/coco-2017-dataset", force=True)
+    # Otherwise download
+    print("⬇️ COCO dataset not found. Downloading...")
+    coco_root = kagglehub.dataset_download("awsaf49/coco-2017-dataset")
     print(f"✅ COCO dataset downloaded to {coco_root}")
     return coco_root
+
 
 def parse_args():
     p = argparse.ArgumentParser("Train TransVAE (patched)")
