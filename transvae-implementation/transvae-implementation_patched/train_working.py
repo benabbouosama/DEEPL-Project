@@ -44,21 +44,17 @@ from PIL import Image
 import json
 
 class COCODataset(Dataset):
-    def __init__(self, max_samples=None, transform=None):
-        import kagglehub
-        from kagglehub import KaggleDatasetAdapter
-
+    def __init__(self, root, transform=None, max_samples=None):
+        self.root = root
         self.transform = transform
 
-        # Load the COCO dataset directly with KaggleHub
-        df = kagglehub.load_dataset(
-            KaggleDatasetAdapter.PANDAS,
-            "awsaf49/coco-2017-dataset"
-        )
+        ann_file = os.path.join(root, "annotations", "instances_train2017.json")
+        with open(ann_file, "r") as f:
+            coco = json.load(f)
 
-        # COCOHub gives you a dataframe with 'image' column
-        self.images = df['image'].tolist()
+        self.images = coco["images"]
 
+        # 🔥 limit dataset size
         if max_samples is not None:
             self.images = self.images[:max_samples]
 
@@ -66,17 +62,15 @@ class COCODataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx):
-        img = self.images[idx]
+        img_info = self.images[idx]
+        img_path = os.path.join(self.root, "train2017", img_info["file_name"])
 
-        # Convert to PIL Image if needed
-        if not isinstance(img, Image.Image):
-            img = Image.open(img).convert("RGB")
+        image = Image.open(img_path).convert("RGB")
 
         if self.transform:
-            img = self.transform(img)
+            image = self.transform(image)
 
-        return img, 0
-
+        return image, 0  # label unused
 
 def get_coco_root():
     """
@@ -247,22 +241,32 @@ class HFTransformIterableDataset(torch.utils.data.IterableDataset):
 
 
 def create_dataloader(args, rank, world_size):
+
     transform = transforms.Compose([
         transforms.Resize(args.resolution),
         transforms.CenterCrop(args.resolution),
-        transforms.ToTensor(),
+        transforms.ToTensor(),  # [0,1]
     ])
 
     if args.dataset == "coco":
+        coco_root = get_coco_root()
+
         train_dataset = COCODataset(
-            max_samples=args.size,
-            transform=transform
+            root=coco_root,
+            transform=transform,
+            max_samples=args.size  # 🔥 USE ONLY ONE TRAINING SET
         )
+
     else:
         raise NotImplementedError
 
     if world_size > 1:
-        sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True
+        )
         shuffle = False
     else:
         sampler = None
@@ -279,7 +283,6 @@ def create_dataloader(args, rank, world_size):
     )
 
     return dataloader, sampler
-
 
 
 def make_scheduler(args, optimizer):
