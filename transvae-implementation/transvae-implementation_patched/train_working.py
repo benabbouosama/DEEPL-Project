@@ -77,22 +77,23 @@ def get_coco_root():
     Returns local path to COCO 2017 dataset.
     Downloads it only if not already present.
     """
-    cache_dir = os.path.expanduser("~/.cache/kagglehub/datasets/awsaf49/coco-2017-dataset")
-
+    base_cache_dir = os.path.expanduser("~/.cache/kagglehub/datasets/awsaf49/coco-2017-dataset")
+    versions_dir = os.path.join(base_cache_dir, "versions")
+    
     # If already downloaded, reuse latest version
-    if os.path.exists(cache_dir) and len(os.listdir(cache_dir)) > 0:
-        versions = sorted(os.listdir(cache_dir))
+    if os.path.exists(versions_dir) and len(os.listdir(versions_dir)) > 0:
+        versions = sorted(os.listdir(versions_dir))
         latest_version = versions[-1]
-        coco_root = os.path.join(cache_dir, latest_version)
+        # The actual dataset is inside a 'coco2017' subdirectory
+        coco_root = os.path.join(versions_dir, latest_version, "coco2017")
         print(f"✅ Using cached COCO dataset at {coco_root}")
         return coco_root
-
+    
     # Otherwise download
     print("⬇️ COCO dataset not found. Downloading...")
     coco_root = kagglehub.dataset_download("awsaf49/coco-2017-dataset")
     print(f"✅ COCO dataset downloaded to {coco_root}")
     return coco_root
-
 
 def parse_args():
     p = argparse.ArgumentParser("Train TransVAE (patched)")
