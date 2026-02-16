@@ -81,8 +81,20 @@ def generate_random_samples(model, latent_dim, num_samples, device, seed=None):
     
     print(f"Generating {num_samples} random samples...")
     
-    # Sample from standard normal
-    z = torch.randn(num_samples, latent_dim, device=device)
+    # Get spatial dimensions from model config
+    # For f16 compression, latent spatial size should be H/16 x W/16
+    # Assuming 256x256 input -> 16x16 latent spatial
+    if hasattr(model, 'module'):
+        encoder = model.module.encoder
+    else:
+        encoder = model.encoder
+    
+    # Infer spatial size from compression ratio
+    # f16 means 256/16 = 16x16 spatial latent
+    spatial_size = 16  # For f16 compression on 256x256 images
+    
+    # Sample from standard normal with spatial dimensions
+    z = torch.randn(num_samples, latent_dim, spatial_size, spatial_size, device=device)
     
     # Decode
     if hasattr(model, 'module'):
@@ -105,9 +117,12 @@ def interpolate_latents(model, latent_dim, num_steps, device, seed=None):
     
     print(f"Generating interpolation with {num_steps} steps...")
     
-    # Sample two random latent vectors
-    z1 = torch.randn(1, latent_dim, device=device)
-    z2 = torch.randn(1, latent_dim, device=device)
+    # Infer spatial size from compression ratio
+    spatial_size = 16  # For f16 compression on 256x256 images
+    
+    # Sample two random latent vectors with spatial dimensions
+    z1 = torch.randn(1, latent_dim, spatial_size, spatial_size, device=device)
+    z2 = torch.randn(1, latent_dim, spatial_size, spatial_size, device=device)
     
     # Create interpolation
     alphas = torch.linspace(0, 1, num_steps, device=device)
